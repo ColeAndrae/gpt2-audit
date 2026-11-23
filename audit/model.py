@@ -21,12 +21,19 @@ def embed(x):
 
 def layer_norm(x, layer, block):
 
-    if layer == 1:
+    
+    if layer == 0:
+        weight = model.transformer.ln_f.weight
+        bias = model.transformer.ln_f.bias
+    elif layer == 1:
         weight = model.transformer.h[block].ln_1.weight
         bias = model.transformer.h[block].ln_1.bias
-    if layer == 2:
+    elif layer == 2:
         weight = model.transformer.h[block].ln_2.weight
         bias = model.transformer.h[block].ln_2.bias
+    else:
+        raise ValueError("Layer must be 0, 1, or 2.")
+
 
     ln = (x - x.mean(2, keepdim=True)) / (x.var(2, keepdim=True, unbiased=False) + 1e-5).sqrt()
 
@@ -73,3 +80,26 @@ def mlp(x, block):
     fc_out = F.gelu(fc_out, approximate='tanh')
 
     return fc_out @ proj_weight + proj_bias
+
+
+def block(x, b):
+
+    ln_1_out = layer_norm(x, 1, b)
+    attn_out = x + attn(ln_1_out, b)
+    ln_2_out = layer_norm(attn_out, 2, b)
+
+    return attn_out + mlp(ln_2_out, b)
+
+
+def forward(x):
+
+    x = embed(x)
+
+    for b in range(12):
+        x = block(x, b)
+
+    x = layer_norm(x, 0, 0)
+
+    out = x @ model.transformer.wte.weight.T
+
+    return out

@@ -14,7 +14,7 @@ TEST_SHAPES = [(3, 4, 768),
                (8, 8, 768)]
 
 
-def test_attention():
+def test_mlp():
 
     model = GPT2LMHeadModel.from_pretrained("gpt2")
 
