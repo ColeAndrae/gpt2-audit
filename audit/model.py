@@ -1,12 +1,12 @@
+import math
+
 import torch
-import torch.nn as nn
-import numpy as np
 import torch.nn.functional as F
 from transformers import GPT2LMHeadModel
-from transformers import GPT2TokenizerFast
 
 
 model = GPT2LMHeadModel.from_pretrained("gpt2")
+config = model.config
 
 
 def embed(x):
@@ -21,7 +21,6 @@ def embed(x):
 
 def layer_norm(x, layer, block):
 
-    
     if layer == 0:
         weight = model.transformer.ln_f.weight
         bias = model.transformer.ln_f.bias
@@ -34,8 +33,7 @@ def layer_norm(x, layer, block):
     else:
         raise ValueError("Layer must be 0, 1, or 2.")
 
-
-    ln = (x - x.mean(2, keepdim=True)) / (x.var(2, keepdim=True, unbiased=False) + 1e-5).sqrt()
+    ln = (x - x.mean(-1, keepdim=True)) / (x.var(-1, keepdim=True, unbiased=False) + config.layer_norm_epsilon).sqrt()
 
     return ln * weight + bias
 
@@ -43,6 +41,7 @@ def layer_norm(x, layer, block):
 def attn(x, block):
 
     B, T, C = x.shape
+    H = config.n_head
 
     mask = torch.tril(torch.ones(T, T, dtype=torch.bool))
 
@@ -50,14 +49,14 @@ def attn(x, block):
     c_attn_bias = model.transformer.h[block].attn.c_attn.bias
     c_attn_out = x @ c_attn_weight + c_attn_bias
 
-    Q, K, V = c_attn_out.split(768, dim=2)
+    Q, K, V = c_attn_out.split(C, dim=2)
 
-    Q = Q.view(B, T, 12, -1).transpose(1, 2)
-    K = K.view(B, T, 12, -1).transpose(1, 2)
-    V = V.view(B, T, 12, -1).transpose(1, 2)
+    Q = Q.view(B, T, H, -1).transpose(1, 2)
+    K = K.view(B, T, H, -1).transpose(1, 2)
+    V = V.view(B, T, H, -1).transpose(1, 2)
 
-    scores = Q @ K.transpose(2, 3) / 8
-    scores = scores.masked_fill(~mask, float('-inf'))
+    scores = Q @ K.transpose(2, 3) / math.sqrt(C // H)
+    scores = scores.masked_fill(~mask, float("-inf"))
     scores = scores.softmax(dim=-1)
 
     out = (scores @ V).transpose(1, 2).reshape(B, T, C)
@@ -77,7 +76,7 @@ def mlp(x, block):
 
     fc_out = x @ fc_weight + fc_bias
 
-    fc_out = F.gelu(fc_out, approximate='tanh')
+    fc_out = F.gelu(fc_out, approximate="tanh")
 
     return fc_out @ proj_weight + proj_bias
 
@@ -95,7 +94,7 @@ def forward(x):
 
     x = embed(x)
 
-    for b in range(12):
+    for b in range(config.n_layer):
         x = block(x, b)
 
     x = layer_norm(x, 0, 0)

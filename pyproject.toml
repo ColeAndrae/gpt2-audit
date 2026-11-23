@@ -1,8 +1,10 @@
 [project]
 name = "gpt2-audit"
 version = "0.0.1"
+description = "A hand-written GPT-2 small forward pass, checked stage by stage against Hugging Face"
+readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["numpy", "torch", "transformers"]
+dependencies = ["torch", "transformers"]
 
 [project.optional-dependencies]
 test = ["pytest"]
