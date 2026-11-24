@@ -38,7 +38,7 @@ def layer_norm(x, layer, block):
     return ln * weight + bias
 
 
-def attn(x, block):
+def attn(x, block, target_head=None, replacement_head=None, cache=None):
 
     B, T, C = x.shape
     H = config.n_head
@@ -59,7 +59,15 @@ def attn(x, block):
     scores = scores.masked_fill(~mask, float("-inf"))
     scores = scores.softmax(dim=-1)
 
-    out = (scores @ V).transpose(1, 2).reshape(B, T, C)
+    out = scores @ V
+
+    if target_head is not None and cache is not None:
+        cache[(block, target_head)] = out[:,target_head,:,:].clone()
+
+    if target_head is not None and replacement_head is not None:
+        out[:,target_head,:,:] = replacement_head
+
+    out = out.transpose(1, 2).reshape(B, T, C)
 
     c_proj_weight = model.transformer.h[block].attn.c_proj.weight
     c_proj_bias = model.transformer.h[block].attn.c_proj.bias
@@ -81,21 +89,24 @@ def mlp(x, block):
     return fc_out @ proj_weight + proj_bias
 
 
-def block(x, b):
+def block(x, b, target_head=None, replacement_head=None, cache=None):
 
     ln_1_out = layer_norm(x, 1, b)
-    attn_out = x + attn(ln_1_out, b)
+    attn_out = x + attn(ln_1_out, b, target_head, replacement_head, cache)
     ln_2_out = layer_norm(attn_out, 2, b)
 
     return attn_out + mlp(ln_2_out, b)
 
 
-def forward(x):
+def forward(x, target_block=None, target_head=None, replacement_head=None, cache=None):
 
     x = embed(x)
 
     for b in range(config.n_layer):
-        x = block(x, b)
+        if b == target_block:
+            x = block(x, b, target_head, replacement_head, cache)
+        else:
+            x = block(x, b)
 
     x = layer_norm(x, 0, 0)
 
